@@ -1,0 +1,13 @@
+{
+  "name": "com.anubis.ui",
+  "version": "1.0.0",
+  "displayName": "Anubis UI Tools",
+  "unity": "6000.2",
+  "description": "UI Tools",
+  "author": {
+    "name": "Anubis Alves"
+  },
+  "dependencies": {
+    "com.unity.ugui" : "2.0.0"
+  }
+}

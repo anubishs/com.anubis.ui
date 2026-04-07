@@ -1,0 +1,19 @@
+{
+    "name": "Anubis.Ui.Editor",
+    "rootNamespace": "",
+    "references": [
+        "Unity.TextMeshPro",
+        "Anubis.Ui"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
