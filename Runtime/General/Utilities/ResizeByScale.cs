@@ -5,7 +5,7 @@ using UnityEngine.UI;
 
 [RequireComponent(typeof(RectTransform))]
 [RequireComponent(typeof(Outline))]
-public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
+public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler, ICalibratableUI
 {
     [Header("Identification")]
     public string objectName;
@@ -23,21 +23,30 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
     public Color dragColor = Color.red;
     public float outlineThickness = 2f;
 
-    private RectTransform rectTransform;
-    private Canvas canvas;
-    private Vector2 initialPosition;
-    private Vector3 initialScale;
-    private Vector2 initialMousePosition;
-    private bool isResizing;
-    private Outline outline;
-    private bool isDragging;
+    RectTransform rectTransform;
+    Canvas canvas;
+    Vector2 initialPosition;
+    Vector3 initialScale;
+    Vector2 initialMousePosition;
+    bool isResizing;
+    Outline outline;
+    bool isDragging;
+
+    Vector2 defaultPosition;
+    Vector3 defaultScale;
+
+    public string StableId => objectName;
 
     void Awake()
     {
         objectName = gameObject.name;
         txtButton = GetComponentInChildren<TextMeshProUGUI>();
-        txtButton.text = objectName;
-        txtButton.gameObject.SetActive(false);
+        if (txtButton)
+        {
+            txtButton.text = objectName;
+            txtButton.gameObject.SetActive(false);
+        }
+
         buttonImage = GetComponent<Image>();
         outline = GetComponent<Outline>();
         SetupOutline();
@@ -47,11 +56,36 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
     {
         rectTransform = GetComponent<RectTransform>();
         canvas = GetComponentInParent<Canvas>();
+
+        defaultPosition = rectTransform.anchoredPosition;
+        defaultScale = transform.localScale;
+
         LoadButtonState();
         UpdateOutlineVisibility();
+
+        if (UICalibrationManager.instance)
+            UICalibrationManager.instance.Register(this);
     }
 
-    private void SetupOutline()
+    void OnEnable()
+    {
+        UpdateOutlineVisibility();
+
+        if (UICalibrationManager.instance)
+            UICalibrationManager.instance.Register(this);
+    }
+
+    void OnDisable()
+    {
+        isDragging = false;
+        SaveButtonState();
+        UpdateOutlineVisibility();
+
+        if (UICalibrationManager.instance)
+            UICalibrationManager.instance.Unregister(this);
+    }
+
+    void SetupOutline()
     {
         if (outline == null)
             outline = gameObject.AddComponent<Outline>();
@@ -60,7 +94,7 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
         outline.enabled = false;
     }
 
-    private void UpdateOutlineVisibility()
+    void UpdateOutlineVisibility()
     {
         if (!allowReposition && !allowResize)
         {
@@ -72,21 +106,17 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
         outline.enabled = true;
     }
 
-    private void Update()
+    public void SetCalibrationMode(bool enabled)
     {
-        if (Input.GetKeyDown(KeyCode.F2))
-        {
-            ToggleEditMode();
-        }
-    }
+        allowReposition = enabled;
+        allowResize = enabled;
 
-    private void ToggleEditMode()
-    {
-        allowReposition = !allowReposition;
-        allowResize = allowReposition;
-        txtButton.gameObject.SetActive(allowReposition);
+        if (txtButton)
+            txtButton.gameObject.SetActive(enabled);
 
-        buttonImage.sprite = allowReposition ? whiteImage : transparentImage;
+        if (buttonImage)
+            buttonImage.sprite = enabled ? whiteImage : transparentImage;
+
         UpdateOutlineVisibility();
     }
 
@@ -128,7 +158,6 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
         if (isResizing && allowResize)
         {
             float scaleFactor = (mouseDelta.x - mouseDelta.y) * 0.005f;
-
             Vector3 newScale = initialScale + Vector3.one * scaleFactor;
 
             newScale.x = Mathf.Max(0.1f, newScale.x);
@@ -138,7 +167,11 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
         }
         else if (allowReposition)
         {
-            rectTransform.anchoredPosition = initialPosition + mouseDelta;
+            Vector2 target = initialPosition + mouseDelta;
+            if (UICalibrationManager.instance)
+                target = UICalibrationManager.instance.ApplySnap(target);
+
+            rectTransform.anchoredPosition = target;
         }
     }
 
@@ -148,22 +181,10 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
         UpdateOutlineVisibility();
     }
 
-    void OnDisable()
-    {
-        isDragging = false;
-        SaveButtonState();
-        UpdateOutlineVisibility();
-    }
-
-    void OnEnable()
-    {
-        UpdateOutlineVisibility();
-    }
-
-    private Vector2 GetScaledMousePosition(PointerEventData eventData)
+    Vector2 GetScaledMousePosition(PointerEventData eventData)
     {
         Vector2 mousePos = eventData.position;
-        if (canvas.renderMode == RenderMode.ScreenSpaceCamera)
+        if (canvas != null && canvas.renderMode == RenderMode.ScreenSpaceCamera)
         {
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 canvas.transform as RectTransform,
@@ -173,35 +194,64 @@ public class ResizeByScale : MonoBehaviour, IPointerDownHandler, IDragHandler, I
             );
         }
 
-        return mousePos / canvas.scaleFactor;
+        return canvas != null ? mousePos / canvas.scaleFactor : mousePos;
     }
 
     public void SaveButtonState()
     {
-        PlayerPrefs.SetFloat(objectName + "_x", rectTransform.anchoredPosition.x);
-        PlayerPrefs.SetFloat(objectName + "_y", rectTransform.anchoredPosition.y);
+        string keyBase = string.IsNullOrEmpty(objectName) ? gameObject.name : objectName;
+        PlayerPrefs.SetFloat(keyBase + "_x", rectTransform.anchoredPosition.x);
+        PlayerPrefs.SetFloat(keyBase + "_y", rectTransform.anchoredPosition.y);
 
-        PlayerPrefs.SetFloat(objectName + "_sx", transform.localScale.x);
-        PlayerPrefs.SetFloat(objectName + "_sy", transform.localScale.y);
+        PlayerPrefs.SetFloat(keyBase + "_sx", transform.localScale.x);
+        PlayerPrefs.SetFloat(keyBase + "_sy", transform.localScale.y);
 
         PlayerPrefs.Save();
     }
 
     public void LoadButtonState()
     {
-        if (PlayerPrefs.HasKey(objectName + "_x"))
+        string keyBase = string.IsNullOrEmpty(objectName) ? gameObject.name : objectName;
+        if (PlayerPrefs.HasKey(keyBase + "_x"))
         {
             rectTransform.anchoredPosition = new Vector2(
-                PlayerPrefs.GetFloat(objectName + "_x"),
-                PlayerPrefs.GetFloat(objectName + "_y")
+                PlayerPrefs.GetFloat(keyBase + "_x"),
+                PlayerPrefs.GetFloat(keyBase + "_y")
             );
 
             transform.localScale = new Vector3(
-                PlayerPrefs.GetFloat(objectName + "_sx", 1f),
-                PlayerPrefs.GetFloat(objectName + "_sy", 1f),
+                PlayerPrefs.GetFloat(keyBase + "_sx", 1f),
+                PlayerPrefs.GetFloat(keyBase + "_sy", 1f),
                 1f
             );
         }
+    }
+
+    public UICalibrationState CaptureState()
+    {
+        return new UICalibrationState
+        {
+            id = StableId,
+            mode = UICalibrationValueMode.Scale,
+            anchoredPosition = rectTransform.anchoredPosition,
+            sizeDelta = rectTransform.sizeDelta,
+            localScale = transform.localScale
+        };
+    }
+
+    public void ApplyState(UICalibrationState state)
+    {
+        if (state == null)
+            return;
+
+        rectTransform.anchoredPosition = state.anchoredPosition;
+        transform.localScale = state.localScale;
+    }
+
+    public void ResetCalibrationDefault()
+    {
+        rectTransform.anchoredPosition = defaultPosition;
+        transform.localScale = defaultScale;
     }
 
     public static void SaveAll()

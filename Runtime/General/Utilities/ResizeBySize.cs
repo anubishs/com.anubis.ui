@@ -5,7 +5,7 @@ using UnityEngine.UI;
 
 [RequireComponent(typeof(RectTransform))]
 [RequireComponent(typeof(Outline))]
-public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
+public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler, ICalibratableUI
 {
     [Header("Identification")]
     public string objectName;
@@ -23,21 +23,30 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
     public Color dragColor = Color.red;
     public float outlineThickness = 2f;
 
-    private RectTransform rectTransform;
-    private Canvas canvas;
-    private Vector2 initialPosition;
-    private Vector2 initialSize;
-    private Vector2 initialMousePosition;
-    private bool isResizing;
-    private Outline outline;
-    private bool isDragging;
+    RectTransform rectTransform;
+    Canvas canvas;
+    Vector2 initialPosition;
+    Vector2 initialSize;
+    Vector2 initialMousePosition;
+    bool isResizing;
+    Outline outline;
+    bool isDragging;
+
+    Vector2 defaultPosition;
+    Vector2 defaultSize;
+
+    public string StableId => objectName;
 
     void Awake()
     {
         objectName = gameObject.name;
         txtButton = GetComponentInChildren<TextMeshProUGUI>();
-        txtButton.text = objectName;
-        txtButton.gameObject.SetActive(false);
+        if (txtButton)
+        {
+            txtButton.text = objectName;
+            txtButton.gameObject.SetActive(false);
+        }
+
         buttonImage = GetComponent<Image>();
         outline = GetComponent<Outline>();
         SetupOutline();
@@ -47,48 +56,71 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
     {
         rectTransform = GetComponent<RectTransform>();
         canvas = GetComponentInParent<Canvas>();
+
+        defaultPosition = rectTransform.anchoredPosition;
+        defaultSize = rectTransform.sizeDelta;
+
         LoadButtonState();
         UpdateOutlineVisibility();
+
+        if (UICalibrationManager.instance)
+            UICalibrationManager.instance.Register(this);
     }
 
-    private void SetupOutline()
+    void OnEnable()
+    {
+        UpdateOutlineVisibility();
+
+        if (UICalibrationManager.instance)
+            UICalibrationManager.instance.Register(this);
+    }
+
+    void OnDisable()
+    {
+        isDragging = false;
+        SaveButtonState();
+        UpdateOutlineVisibility();
+
+        if (UICalibrationManager.instance)
+            UICalibrationManager.instance.Unregister(this);
+    }
+
+    void SetupOutline()
     {
         if (outline == null)
             outline = gameObject.AddComponent<Outline>();
-        
+
         outline.effectDistance = new Vector2(outlineThickness, outlineThickness);
         outline.enabled = false;
     }
 
-    private void UpdateOutlineVisibility()
+    void UpdateOutlineVisibility()
     {
         if (!allowReposition && !allowResize)
         {
             outline.enabled = false;
             return;
         }
-        
-        // Green outline when element can be moved/resized
+
         outline.effectColor = moveColor;
         outline.enabled = true;
     }
 
-    private void Update()
+    public void SetCalibrationMode(bool enabled)
     {
-        if (Input.GetKeyDown(KeyCode.F2))
-        {
-            ToggleEditMode();
-            buttonImage.gameObject.GetComponent<Button>().enabled = !buttonImage.gameObject.GetComponent<Button>().enabled;
-        }
-    }
+        allowReposition = enabled;
+        allowResize = enabled;
 
-    private void ToggleEditMode()
-    {
-        allowReposition = !allowReposition;
-        allowResize = allowReposition; // Link resize to reposition mode
-        txtButton.gameObject.SetActive(allowReposition);
+        if (txtButton)
+            txtButton.gameObject.SetActive(enabled);
 
-        buttonImage.sprite = allowReposition ? whiteImage : transparentImage;
+        if (buttonImage)
+            buttonImage.sprite = enabled ? whiteImage : transparentImage;
+
+        Button button = buttonImage ? buttonImage.gameObject.GetComponent<Button>() : null;
+        if (button)
+            button.enabled = !enabled;
+
         UpdateOutlineVisibility();
     }
 
@@ -101,15 +133,14 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
         initialSize = rectTransform.sizeDelta;
         initialMousePosition = GetScaledMousePosition(eventData);
 
-        // Check if we're clicking on resize border
         Vector2 localPoint;
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            rectTransform, 
-            eventData.position, 
-            eventData.pressEventCamera, 
+            rectTransform,
+            eventData.position,
+            eventData.pressEventCamera,
             out localPoint
         );
-        
+
         Rect rect = rectTransform.rect;
         isResizing = allowResize && (
             localPoint.x < rect.xMin + resizeBorderWidth ||
@@ -118,7 +149,6 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
             localPoint.y > rect.yMax - resizeBorderWidth
         );
 
-        // Change to red during interaction
         outline.effectColor = dragColor;
     }
 
@@ -131,44 +161,32 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
 
         if (isResizing && allowResize)
         {
-            // Apply resizing
-            rectTransform.sizeDelta = initialSize + new Vector2(
-                mouseDelta.x, 
-                -mouseDelta.y
+            Vector2 targetSize = initialSize + new Vector2(mouseDelta.x, -mouseDelta.y);
+            rectTransform.sizeDelta = new Vector2(
+                Mathf.Max(1f, targetSize.x),
+                Mathf.Max(1f, targetSize.y)
             );
         }
         else if (allowReposition)
         {
-            // Apply repositioning
-            rectTransform.anchoredPosition = initialPosition + mouseDelta;
+            Vector2 targetPos = initialPosition + mouseDelta;
+            if (UICalibrationManager.instance)
+                targetPos = UICalibrationManager.instance.ApplySnap(targetPos);
+
+            rectTransform.anchoredPosition = targetPos;
         }
     }
 
     public void OnPointerUp(PointerEventData eventData)
     {
         isDragging = false;
-        // Return to green after interaction
         UpdateOutlineVisibility();
     }
 
-    void OnDisable()
-    {
-        isDragging = false;
-        SaveButtonState();
-        // Ensure green outline when disabled
-        UpdateOutlineVisibility();
-    }
-
-    void OnEnable()
-    {
-        // Ensure green outline when enabled
-        UpdateOutlineVisibility();
-    }
-
-    private Vector2 GetScaledMousePosition(PointerEventData eventData)
+    Vector2 GetScaledMousePosition(PointerEventData eventData)
     {
         Vector2 mousePos = eventData.position;
-        if (canvas.renderMode == RenderMode.ScreenSpaceCamera)
+        if (canvas != null && canvas.renderMode == RenderMode.ScreenSpaceCamera)
         {
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 canvas.transform as RectTransform,
@@ -177,35 +195,63 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
                 out mousePos
             );
         }
-        return mousePos / canvas.scaleFactor;
+        return canvas != null ? mousePos / canvas.scaleFactor : mousePos;
     }
 
     public void SaveButtonState()
     {
-        PlayerPrefs.SetFloat(objectName + "_x", rectTransform.anchoredPosition.x);
-        PlayerPrefs.SetFloat(objectName + "_y", rectTransform.anchoredPosition.y);
-        PlayerPrefs.SetFloat(objectName + "_width", rectTransform.sizeDelta.x);
-        PlayerPrefs.SetFloat(objectName + "_height", rectTransform.sizeDelta.y);
+        string keyBase = string.IsNullOrEmpty(objectName) ? gameObject.name : objectName;
+        PlayerPrefs.SetFloat(keyBase + "_x", rectTransform.anchoredPosition.x);
+        PlayerPrefs.SetFloat(keyBase + "_y", rectTransform.anchoredPosition.y);
+        PlayerPrefs.SetFloat(keyBase + "_width", rectTransform.sizeDelta.x);
+        PlayerPrefs.SetFloat(keyBase + "_height", rectTransform.sizeDelta.y);
         PlayerPrefs.Save();
     }
 
     public void LoadButtonState()
     {
-        if (PlayerPrefs.HasKey(objectName + "_x"))
+        string keyBase = string.IsNullOrEmpty(objectName) ? gameObject.name : objectName;
+        if (PlayerPrefs.HasKey(keyBase + "_x"))
         {
             rectTransform.anchoredPosition = new Vector2(
-                PlayerPrefs.GetFloat(objectName + "_x"),
-                PlayerPrefs.GetFloat(objectName + "_y")
+                PlayerPrefs.GetFloat(keyBase + "_x"),
+                PlayerPrefs.GetFloat(keyBase + "_y")
             );
-            
+
             rectTransform.sizeDelta = new Vector2(
-                PlayerPrefs.GetFloat(objectName + "_width"),
-                PlayerPrefs.GetFloat(objectName + "_height")
+                PlayerPrefs.GetFloat(keyBase + "_width"),
+                PlayerPrefs.GetFloat(keyBase + "_height")
             );
         }
     }
 
-    // For easy saving from other scripts
+    public UICalibrationState CaptureState()
+    {
+        return new UICalibrationState
+        {
+            id = StableId,
+            mode = UICalibrationValueMode.Size,
+            anchoredPosition = rectTransform.anchoredPosition,
+            sizeDelta = rectTransform.sizeDelta,
+            localScale = transform.localScale
+        };
+    }
+
+    public void ApplyState(UICalibrationState state)
+    {
+        if (state == null)
+            return;
+
+        rectTransform.anchoredPosition = state.anchoredPosition;
+        rectTransform.sizeDelta = state.sizeDelta;
+    }
+
+    public void ResetCalibrationDefault()
+    {
+        rectTransform.anchoredPosition = defaultPosition;
+        rectTransform.sizeDelta = defaultSize;
+    }
+
     public static void SaveAll()
     {
         PlayerPrefs.Save();
