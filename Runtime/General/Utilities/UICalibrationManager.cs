@@ -9,35 +9,10 @@ public enum CalibrationAccessMode
     UnlockCode
 }
 
-public enum UICalibrationValueMode
-{
-    Size,
-    Scale
-}
-
-[Serializable]
-public class UICalibrationState
-{
-    public string id;
-    public UICalibrationValueMode mode;
-    public Vector2 anchoredPosition;
-    public Vector2 sizeDelta;
-    public Vector3 localScale;
-}
-
 [Serializable]
 class UICalibrationStateCollection
 {
     public List<UICalibrationState> items = new List<UICalibrationState>();
-}
-
-public interface ICalibratableUI
-{
-    string StableId { get; }
-    UICalibrationState CaptureState();
-    void ApplyState(UICalibrationState state);
-    void ResetCalibrationDefault();
-    void SetCalibrationMode(bool enabled);
 }
 
 public class UICalibrationManager : MonoBehaviour
