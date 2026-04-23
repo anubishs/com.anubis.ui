@@ -39,7 +39,11 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
 
     void Awake()
     {
-        objectName = gameObject.name;
+        rectTransform = GetComponent<RectTransform>();
+        canvas = GetComponentInParent<Canvas>();
+
+        objectName = GetFullPath(transform);
+
         txtButton = GetComponentInChildren<TextMeshProUGUI>();
         if (txtButton)
         {
@@ -54,9 +58,6 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
 
     void Start()
     {
-        rectTransform = GetComponent<RectTransform>();
-        canvas = GetComponentInParent<Canvas>();
-
         defaultPosition = rectTransform.anchoredPosition;
         defaultSize = rectTransform.sizeDelta;
 
@@ -65,6 +66,18 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
 
         if (UICalibrationManager.instance)
             UICalibrationManager.instance.Register(this);
+    }
+    string GetFullPath(Transform t)
+    {
+        System.Text.StringBuilder path = new System.Text.StringBuilder(t.name);
+
+        while (t.parent != null)
+        {
+            t = t.parent;
+            path.Insert(0, t.name + "/");
+        }
+
+        return path.ToString();
     }
 
     void OnEnable()
@@ -200,6 +213,7 @@ public class ResizeUiBySize : MonoBehaviour, IPointerDownHandler, IDragHandler, 
 
     public void SaveButtonState()
     {
+        if (rectTransform == null) return;
         string keyBase = string.IsNullOrEmpty(objectName) ? gameObject.name : objectName;
         PlayerPrefs.SetFloat(keyBase + "_x", rectTransform.anchoredPosition.x);
         PlayerPrefs.SetFloat(keyBase + "_y", rectTransform.anchoredPosition.y);
