@@ -41,6 +41,20 @@ public class UICalibrationManager : MonoBehaviour
 
     public bool CalibrationEnabled => calibrationEnabled;
 
+    bool ProfileExists(string profileName = null)
+    {
+        string profile = NormalizeProfile(profileName);
+
+        for (int i = 0; i < elements.Count; i++)
+        {
+            string key = BuildKey(profile, elements[i].StableId);
+            if (PlayerPrefs.HasKey(key))
+                return true;
+        }
+
+        return false;
+    }
+
     void Awake()
     {
         if (instance != null && instance != this)
@@ -55,6 +69,19 @@ public class UICalibrationManager : MonoBehaviour
     void Start()
     {
         SetCalibrationEnabled(startEnabled && HasAccess());
+
+        // Delay load to ensure all UI elements registered
+        StartCoroutine(LoadProfileNextFrame());
+    }
+
+    System.Collections.IEnumerator LoadProfileNextFrame()
+    {
+        yield return null; // wait 1 frame
+
+        if (ProfileExists(defaultProfile))
+        {
+            LoadProfile(defaultProfile);
+        }
     }
 
     void Update()
@@ -68,7 +95,17 @@ public class UICalibrationManager : MonoBehaviour
             return;
         }
 
-        SetCalibrationEnabled(!calibrationEnabled);
+
+        bool wasEnabled = calibrationEnabled;
+        bool newState = !calibrationEnabled;
+
+        SetCalibrationEnabled(newState);
+
+        // If we just disabled (F2 pressed again), save automatically
+        if (wasEnabled && !newState)
+        {
+            SaveProfile();
+        }
     }
 
     public bool UnlockSession(string code)
